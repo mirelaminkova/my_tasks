@@ -4,15 +4,13 @@ import string
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLineEdit, QPushButton, QLabel, QListWidget,
                              QListWidgetItem, QStackedWidget)
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtCore import Qt
 
-#connect to the database
-from db import init_db
-from db import init_db, add_group, add_task, get_tasks
+# Connect to the database
+from db import init_db, add_group, add_task, get_tasks, update_task_status
 init_db()
 
-# create a random invite code for testing
 def generate_invite_code(length=6):
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
@@ -23,30 +21,22 @@ class LoginPage(QWidget):
         
     def initUI(self):
         layout = QVBoxLayout()
-        # add logo image
+        # Add logo image
         self.logo_label = QLabel()
-        from PyQt5.QtGui import QPixmap
         pixmap = QPixmap('./pics/the_logo.png')
-        
-
         mask = pixmap.createMaskFromColor(Qt.white)
         pixmap.setMask(mask)
-        
-        
         pixmap = pixmap.scaled(500, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        
         self.logo_label.setPixmap(pixmap)
         self.logo_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.logo_label)
-        self.setLayout(layout)
-        
         
         title = QLabel("Welcome to The Chores App")
         title.setFont(QFont("Arial", 18, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
         
-        # username input
+        # Username input
         self.username_edit = QLineEdit()
         self.username_edit.setPlaceholderText("Enter your username")
         layout.addWidget(self.username_edit)
@@ -57,8 +47,13 @@ class LoginPage(QWidget):
         self.join_group_btn = QPushButton("Join Group")
         btn_layout.addWidget(self.create_group_btn)
         btn_layout.addWidget(self.join_group_btn)
+        # Add My Groups button
+        self.my_groups_btn = QPushButton("My Groups")
+        btn_layout.addWidget(self.my_groups_btn)
         layout.addLayout(btn_layout)
         
+        self.setLayout(layout)
+
 class GroupCreationPage(QWidget):
     def __init__(self, parent=None):
         super(GroupCreationPage, self).__init__(parent)
@@ -68,18 +63,15 @@ class GroupCreationPage(QWidget):
         layout = QVBoxLayout()
         self.setLayout(layout)
         
-        # Group creation title
         title = QLabel("Create a Group")
         title.setFont(QFont("Arial", 16, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
         
-        # Input for group name
         self.group_name_edit = QLineEdit()
         self.group_name_edit.setPlaceholderText("Enter group name")
         layout.addWidget(self.group_name_edit)
         
-        # Create group button
         self.create_btn = QPushButton("Create")
         layout.addWidget(self.create_btn)
 
@@ -91,18 +83,16 @@ class JoinGroupPage(QWidget):
     def initUI(self):
         layout = QVBoxLayout()
         self.setLayout(layout)
-
+        
         title = QLabel("Join an Existing Group")
         title.setFont(QFont("Arial", 16, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
-
-        # Input for invite code
+        
         self.invite_code_edit = QLineEdit()
         self.invite_code_edit.setPlaceholderText("Enter invite code")
         layout.addWidget(self.invite_code_edit)
-
-        # Join group button
+        
         self.join_btn = QPushButton("Join")
         layout.addWidget(self.join_btn)
 
@@ -117,27 +107,26 @@ class TaskManagerPage(QWidget):
         layout = QVBoxLayout()
         self.setLayout(layout)
         
-        # adding the optiion to go back to the login page
+        # Add back button
         self.back_btn = QPushButton("← Back")
         self.back_btn.setFixedWidth(80)
         layout.insertWidget(0, self.back_btn)
         
-        # display group info
         self.group_info_label = QLabel("")
         self.group_info_label.setFont(QFont("Arial", 14))
         layout.addWidget(self.group_info_label)
         
-        # display invite code
+        # Invite code label (selectable)
         self.invite_label = QLabel("")
+        self.invite_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.invite_label)
         
-        # task list widget to show tasks
+        # Task list widget
         self.task_list = QListWidget()
         layout.addWidget(self.task_list)
-        # toggle task completion on double-click
-        self.task_list.itemDoubleClicked.connect(self.toggle_task_done)
+        # Update DB when an item's check state changes
+        self.task_list.itemChanged.connect(self.handle_task_changed)
         
-        # layout to add new tasks
         add_layout = QHBoxLayout()
         self.task_input = QLineEdit()
         self.task_input.setPlaceholderText("Enter new task")
@@ -145,12 +134,6 @@ class TaskManagerPage(QWidget):
         add_layout.addWidget(self.task_input)
         add_layout.addWidget(self.add_task_btn)
         layout.addLayout(add_layout)
-        
-    def toggle_task_done(self, item):
-        # Toggle strike-through to mark task as completed
-        font = item.font()
-        font.setStrikeOut(not font.strikeOut())
-        item.setFont(font)
         
     def update_group_info(self, group_name, invite_code, group_id=None):
         self.group_name = group_name
@@ -162,13 +145,68 @@ class TaskManagerPage(QWidget):
             self.task_list.clear()
             tasks = get_tasks(group_id)
             for task in tasks:
+                # task: (id, task_text, is_done)
                 item = QListWidgetItem(task[1])
+                item.setData(Qt.UserRole, task[0])
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                 if task[2]:
-                    font = item.font()
-                    font.setStrikeOut(True)
-                    item.setFont(font)
+                    item.setCheckState(Qt.Checked)
+                else:
+                    item.setCheckState(Qt.Unchecked)
                 self.task_list.addItem(item)
+                
+    def handle_task_changed(self, item):
+        task_id = item.data(Qt.UserRole)
+        new_state = 1 if item.checkState() == Qt.Checked else 0
+        update_task_status(task_id, new_state)
+
+class UserGroupsPage(QWidget):
+    def __init__(self, parent=None):
+        super(UserGroupsPage, self).__init__(parent)
+        self.initUI()
         
+    def initUI(self):
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+        
+        title = QLabel("Existing Groups")
+        title.setFont(QFont("Arial", 16, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        
+        self.groups_list = QListWidget()
+        layout.addWidget(self.groups_list)
+        
+        btn_layout = QHBoxLayout()
+        self.open_group_btn = QPushButton("Open Group")
+        self.join_group_btn = QPushButton("Join Group")
+        self.create_group_btn = QPushButton("Create New Group")
+        btn_layout.addWidget(self.open_group_btn)
+        btn_layout.addWidget(self.join_group_btn)
+        btn_layout.addWidget(self.create_group_btn)
+        layout.addLayout(btn_layout)
+        
+        self.back_btn = QPushButton("← Back")
+        layout.addWidget(self.back_btn)
+        
+    def refresh_groups(self, username):
+        self.groups_list.clear()
+        import sqlite3
+        conn = sqlite3.connect('chores.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT ug.group_id, g.group_name, g.invite_code
+            FROM user_groups ug JOIN groups g ON ug.group_id = g.id
+            WHERE ug.username = ?
+        ''', (username,))
+        rows = cursor.fetchall()
+        conn.close()
+        for row in rows:
+            group_id, group_name, invite_code = row
+            item = QListWidgetItem(f"{group_name} ({invite_code})")
+            item.setData(Qt.UserRole, (group_id, group_name, invite_code))
+            self.groups_list.addItem(item)
+
 class MainWindow(QStackedWidget):
     def __init__(self):
         super(MainWindow, self).__init__()
@@ -176,34 +214,37 @@ class MainWindow(QStackedWidget):
         # Initialize pages
         self.login_page = LoginPage()
         self.group_creation_page = GroupCreationPage()
-        self.join_group_page = JoinGroupPage()  # NEW
+        self.join_group_page = JoinGroupPage()
+        self.user_groups_page = UserGroupsPage()
         self.task_manager_page = TaskManagerPage()
         
-        # Add pages to the stacked widget
+        # Add pages to the stack
         self.addWidget(self.login_page)
         self.addWidget(self.group_creation_page)
-        self.addWidget(self.join_group_page)  # NEW
+        self.addWidget(self.join_group_page)
+        self.addWidget(self.user_groups_page)
         self.addWidget(self.task_manager_page)
         
-        # Initialize previous page tracker
+        # Set previous page tracker
         self.previous_page = self.login_page
         
         # Connect signals
         self.login_page.create_group_btn.clicked.connect(self.goto_group_creation)
-        self.login_page.join_group_btn.clicked.connect(self.goto_join_group)  # UPDATED
+        self.login_page.join_group_btn.clicked.connect(self.goto_join_group)
+        self.login_page.my_groups_btn.clicked.connect(self.goto_user_groups)
         self.group_creation_page.create_btn.clicked.connect(self.create_group)
         self.task_manager_page.add_task_btn.clicked.connect(self.add_task)
-        
-        # Connect the join group page's join button
         self.join_group_page.join_btn.clicked.connect(self.handle_join_group)
-        
-        # Connect back button signal to a new go_back method
+        self.user_groups_page.back_btn.clicked.connect(self.go_back)
         self.task_manager_page.back_btn.clicked.connect(self.go_back)
+        self.user_groups_page.create_group_btn.clicked.connect(self.goto_group_creation)
+        self.user_groups_page.join_group_btn.clicked.connect(self.goto_join_group)
+        self.user_groups_page.open_group_btn.clicked.connect(self.open_selected_group)
         
-        # Apply baby pink theme with style sheet
+        # Apply style
         self.setStyleSheet("""
             QWidget {
-                background-color: #FFB6C1; /* baby pink */
+                background-color: #FFB6C1;
                 color: #333;
                 font-family: Arial;
             }
@@ -233,7 +274,7 @@ class MainWindow(QStackedWidget):
             self.setCurrentWidget(self.group_creation_page)
         else:
             self.login_page.username_edit.setPlaceholderText("Please enter a username!")
-
+    
     def goto_join_group(self):
         username = self.login_page.username_edit.text().strip()
         if username:
@@ -241,20 +282,46 @@ class MainWindow(QStackedWidget):
             self.setCurrentWidget(self.join_group_page)
         else:
             self.login_page.username_edit.setPlaceholderText("Please enter a username!")
-
+    
+    def goto_user_groups(self):
+        username = self.login_page.username_edit.text().strip()
+        if username:
+            self.current_username = username
+            import sqlite3
+            conn = sqlite3.connect('chores.db')
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM user_groups WHERE username = ?', (username,))
+            count = cursor.fetchone()[0]
+            conn.close()
+            if count > 0:
+                self.user_groups_page.refresh_groups(username)
+                self.previous_page = self.login_page
+                self.setCurrentWidget(self.user_groups_page)
+            else:
+                self.previous_page = self.login_page
+                self.setCurrentWidget(self.group_creation_page)
+        else:
+            self.login_page.username_edit.setPlaceholderText("Please enter a username!")
+    
     def create_group(self):
         group_name = self.group_creation_page.group_name_edit.text().strip()
         if group_name:
             invite_code = generate_invite_code()
-            # Save group to the database
             group_id = add_group(group_name, invite_code)
-            # Update the task manager page with group info and load tasks
+            import sqlite3
+            conn = sqlite3.connect('chores.db')
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO user_groups (username, group_id) VALUES (?, ?)',
+                           (self.login_page.username_edit.text().strip(), group_id))
+            conn.commit()
+            conn.close()
             self.task_manager_page.update_group_info(group_name, invite_code, group_id)
             self.current_group_id = group_id
             self.previous_page = self.group_creation_page
             self.setCurrentWidget(self.task_manager_page)
         else:
             self.group_creation_page.group_name_edit.setPlaceholderText("Enter a valid group name!")
+    
     def handle_join_group(self):
         invite_code = self.join_group_page.invite_code_edit.text().strip()
         if invite_code:
@@ -275,25 +342,36 @@ class MainWindow(QStackedWidget):
                 self.join_group_page.invite_code_edit.setPlaceholderText("Invalid code. Try again.")
         else:
             self.join_group_page.invite_code_edit.setPlaceholderText("Please enter an invite code!")
-
+    
     def add_task(self):
         task_text = self.task_manager_page.task_input.text().strip()
         if task_text and hasattr(self, "current_group_id"):
             add_task(self.current_group_id, task_text)
-            # Refresh the task list: clear and reload tasks from the DB
             self.task_manager_page.task_list.clear()
             tasks = get_tasks(self.current_group_id)
             for task in tasks:
                 item = QListWidgetItem(task[1])
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
                 if task[2]:
-                    font = item.font()
-                    font.setStrikeOut(True)
-                    item.setFont(font)
+                    item.setCheckState(Qt.Checked)
+                else:
+                    item.setCheckState(Qt.Unchecked)
+                item.setData(Qt.UserRole, task[0])
                 self.task_manager_page.task_list.addItem(item)
             self.task_manager_page.task_input.clear()
-
+    
+    def open_selected_group(self):
+        selected_item = self.user_groups_page.groups_list.currentItem()
+        if selected_item:
+            data = selected_item.data(Qt.UserRole)
+            if data:
+                group_id, group_name, invite_code = data
+                self.task_manager_page.update_group_info(group_name, invite_code, group_id)
+                self.current_group_id = group_id
+                self.previous_page = self.user_groups_page
+                self.setCurrentWidget(self.task_manager_page)
+    
     def go_back(self):
-        # Go back to the previous page
         self.setCurrentWidget(self.previous_page)
 
 if __name__ == '__main__':

@@ -70,3 +70,11 @@ def get_tasks(group_id):
     tasks = cursor.fetchall()
     conn.close()
     return tasks
+
+def update_task_status(task_id, new_state):
+    import sqlite3
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('UPDATE tasks SET is_done = ? WHERE id = ?', (new_state, task_id))
+    conn.commit()
+    conn.close()
