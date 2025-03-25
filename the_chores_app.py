@@ -3,9 +3,9 @@ import random
 import string
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLineEdit, QPushButton, QLabel, QListWidget,
-                             QListWidgetItem, QStackedWidget)
-from PyQt5.QtGui import QFont, QPixmap
-from PyQt5.QtCore import Qt
+                             QListWidgetItem, QStackedWidget, QStackedLayout, QSizePolicy)
+from PyQt5.QtGui import QFont, QPixmap, QMovie
+from PyQt5.QtCore import Qt, QSize
 
 # Connect to the database
 from db import init_db, add_group, add_task, get_tasks, update_task_status
@@ -20,39 +20,49 @@ class LoginPage(QWidget):
         self.initUI()
         
     def initUI(self):
-        layout = QVBoxLayout()
-        # Add logo image
+        self.setAttribute(Qt.WA_StyledBackground, True)
+
+        # Transparent container for widgets on top of background
+        content_widget = QWidget(self)
+        content_widget.setAttribute(Qt.WA_TranslucentBackground)
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setSpacing(15)
+
+        # Logo animation
         self.logo_label = QLabel()
-        pixmap = QPixmap('./pics/the_logo.png')
-        mask = pixmap.createMaskFromColor(Qt.white)
-        pixmap.setMask(mask)
-        pixmap = pixmap.scaled(500, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.logo_label.setPixmap(pixmap)
+        movie = QMovie('/Users/mirelaminkova/custom_projects/my_chores_app/my_tasks/pics/logo.gif')
+        movie.setScaledSize(QSize(500, 500))
+        self.logo_label.setMovie(movie)
+        movie.start()
         self.logo_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.logo_label)
-        
+        content_layout.addWidget(self.logo_label)
+
+        # Title
         title = QLabel("Welcome to The Chores App")
         title.setFont(QFont("Arial", 18, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
-        
+        content_layout.addWidget(title)
+
         # Username input
         self.username_edit = QLineEdit()
         self.username_edit.setPlaceholderText("Enter your username")
-        layout.addWidget(self.username_edit)
-        
-        # Buttons for creating or joining a group
+        content_layout.addWidget(self.username_edit)
+
+        # Button layout
         btn_layout = QHBoxLayout()
         self.create_group_btn = QPushButton("Create Group")
         self.join_group_btn = QPushButton("Join Group")
+        self.my_groups_btn = QPushButton("My Groups")
         btn_layout.addWidget(self.create_group_btn)
         btn_layout.addWidget(self.join_group_btn)
-        # Add My Groups button
-        self.my_groups_btn = QPushButton("My Groups")
         btn_layout.addWidget(self.my_groups_btn)
-        layout.addLayout(btn_layout)
-        
-        self.setLayout(layout)
+        content_layout.addLayout(btn_layout)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.addWidget(content_widget)
+        main_layout.setAlignment(Qt.AlignCenter)
+        self.setLayout(main_layout)
 
 class GroupCreationPage(QWidget):
     def __init__(self, parent=None):
@@ -62,6 +72,9 @@ class GroupCreationPage(QWidget):
     def initUI(self):
         layout = QVBoxLayout()
         self.setLayout(layout)
+        self.back_btn = QPushButton("← Back")
+        self.back_btn.setFixedWidth(80)
+        layout.addWidget(self.back_btn)
         
         title = QLabel("Create a Group")
         title.setFont(QFont("Arial", 16, QFont.Bold))
@@ -116,16 +129,19 @@ class TaskManagerPage(QWidget):
         self.group_info_label.setFont(QFont("Arial", 14))
         layout.addWidget(self.group_info_label)
         
-        # Invite code label (selectable)
         self.invite_label = QLabel("")
         self.invite_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.invite_label)
         
-        # Task list widget
         self.task_list = QListWidget()
         layout.addWidget(self.task_list)
-        # Update DB when an item's check state changes
         self.task_list.itemChanged.connect(self.handle_task_changed)
+        self.task_list.itemClicked.connect(self.show_remove_button)
+        self.remove_task_btn = QPushButton("Remove Task")
+        self.remove_task_btn.setVisible(False)
+        layout.insertWidget(1, self.remove_task_btn)  # Add it after the Back button
+        self.remove_task_btn.clicked.connect(self.handle_remove_clicked)
+        self.item_to_remove = None
         
         add_layout = QHBoxLayout()
         self.task_input = QLineEdit()
@@ -145,7 +161,6 @@ class TaskManagerPage(QWidget):
             self.task_list.clear()
             tasks = get_tasks(group_id)
             for task in tasks:
-                # task: (id, task_text, is_done)
                 item = QListWidgetItem(task[1])
                 item.setData(Qt.UserRole, task[0])
                 item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
@@ -159,6 +174,29 @@ class TaskManagerPage(QWidget):
         task_id = item.data(Qt.UserRole)
         new_state = 1 if item.checkState() == Qt.Checked else 0
         update_task_status(task_id, new_state)
+
+    def show_remove_button(self, item):
+            if item.checkState() == Qt.Checked:
+                self.item_to_remove = item
+                self.remove_task_btn.setVisible(True)
+            else:
+                self.remove_task_btn.setVisible(False)
+                self.item_to_remove = None
+
+    def handle_remove_clicked(self):
+        if not self.item_to_remove:
+            return
+        item = self.item_to_remove
+        task_id = item.data(Qt.UserRole)
+        import sqlite3
+        conn = sqlite3.connect('chores.db')
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+        conn.commit()
+        conn.close()
+        self.task_list.takeItem(self.task_list.row(item))
+        self.remove_task_btn.setVisible(False)
+        self.item_to_remove = None
 
 class UserGroupsPage(QWidget):
     def __init__(self, parent=None):
@@ -176,6 +214,11 @@ class UserGroupsPage(QWidget):
         
         self.groups_list = QListWidget()
         layout.addWidget(self.groups_list)
+        self.groups_list.itemClicked.connect(self.handle_item_click)
+        self.last_clicked_item = None
+        self.delete_group_btn = QPushButton("Delete Group")
+        self.delete_group_btn.setVisible(False)
+        layout.addWidget(self.delete_group_btn)
         
         btn_layout = QHBoxLayout()
         self.open_group_btn = QPushButton("Open Group")
@@ -207,6 +250,15 @@ class UserGroupsPage(QWidget):
             item.setData(Qt.UserRole, (group_id, group_name, invite_code))
             self.groups_list.addItem(item)
 
+    def handle_item_click(self, item):
+        if self.last_clicked_item == item:
+            self.delete_group_btn.setVisible(True)
+            self.current_item_to_delete = item
+        else:
+            self.delete_group_btn.setVisible(False)
+            self.current_item_to_delete = None
+        self.last_clicked_item = item
+
 class MainWindow(QStackedWidget):
     def __init__(self):
         super(MainWindow, self).__init__()
@@ -214,6 +266,7 @@ class MainWindow(QStackedWidget):
         # Initialize pages
         self.login_page = LoginPage()
         self.group_creation_page = GroupCreationPage()
+        self.group_creation_page.back_btn.clicked.connect(self.go_back)
         self.join_group_page = JoinGroupPage()
         self.user_groups_page = UserGroupsPage()
         self.task_manager_page = TaskManagerPage()
@@ -240,8 +293,8 @@ class MainWindow(QStackedWidget):
         self.user_groups_page.create_group_btn.clicked.connect(self.goto_group_creation)
         self.user_groups_page.join_group_btn.clicked.connect(self.goto_join_group)
         self.user_groups_page.open_group_btn.clicked.connect(self.open_selected_group)
+        self.user_groups_page.delete_group_btn.clicked.connect(self.delete_selected_group)
         
-        # Apply style
         self.setStyleSheet("""
             QWidget {
                 background-color: #FFB6C1;
@@ -366,18 +419,39 @@ class MainWindow(QStackedWidget):
             data = selected_item.data(Qt.UserRole)
             if data:
                 group_id, group_name, invite_code = data
+                self.previous_page = self.user_groups_page
                 self.task_manager_page.update_group_info(group_name, invite_code, group_id)
                 self.current_group_id = group_id
-                self.previous_page = self.user_groups_page
                 self.setCurrentWidget(self.task_manager_page)
+
+    def delete_selected_group(self):
+        item = self.user_groups_page.current_item_to_delete
+        if not item:
+            return
+        group_data = item.data(Qt.UserRole)
+        if group_data:
+            group_id, _, _ = group_data
+            import sqlite3
+            conn = sqlite3.connect('chores.db')
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM tasks WHERE group_id = ?', (group_id,))
+            cursor.execute('DELETE FROM user_groups WHERE group_id = ?', (group_id,))
+            cursor.execute('DELETE FROM groups WHERE id = ?', (group_id,))
+            conn.commit()
+            conn.close()
+            self.user_groups_page.groups_list.takeItem(self.user_groups_page.groups_list.row(item))
+            self.user_groups_page.delete_group_btn.setVisible(False)
     
     def go_back(self):
-        self.setCurrentWidget(self.previous_page)
+        if self.previous_page != self.currentWidget():
+            self.setCurrentWidget(self.previous_page)
+        else:
+            self.setCurrentWidget(self.login_page)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = MainWindow()
     window.setWindowTitle("The Chores App")
-    window.resize(400, 600)
+    window.resize(200, 550)
     window.show()
     sys.exit(app.exec_())
